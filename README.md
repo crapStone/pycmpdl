@@ -1,4 +1,4 @@
 # pycmpdl
-A Curse Modpackdownloader.
+A Curse Modpack downloader.
 
-This programm was inspired by Vazkiis [CMPDL](https://github.com/Vazkii/CMPDL).
+This program was inspired by Vazkiis [CMPDL](https://github.com/Vazkii/CMPDL).
