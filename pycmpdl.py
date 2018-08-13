@@ -15,7 +15,7 @@ from zipfile import ZipFile
 
 from requests import Session
 
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 
 # Exit codes
 EXIT_NO_ERROR = 0
