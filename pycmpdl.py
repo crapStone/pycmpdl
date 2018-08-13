@@ -256,16 +256,29 @@ def setup_server_instance(manifest):
 def main():
     global cache_dir, modpack_cachedir, modpack_basedir
 
+    class ActionClearCache(argparse.Action):
+
+        def __call__(self, parser, namespace, values, option_string=None):
+            shutil.rmtree(cache_dir)
+            exit_program(EXIT_NO_ERROR)
+
     for signum in [signal.SIGINT]:
         try:
             signal.signal(signum, signal_handler)
         except OSError:
             log("Skipping {}".format(signum), logging.WARNING)
 
+    os_cache_dir = os.path.join(os.path.expanduser("~"), ".cache")
+    check_dir(os_cache_dir, "os cache directory")
+
+    cache_dir = os.path.join(os_cache_dir, "pycmpdl")
+    check_dir(cache_dir, "cache directory")
+
     parser = argparse.ArgumentParser(description="Curse Modpack Downloader",
                                      epilog="Report Bugs to https://github.com/crapStone/pycmpdl/issues")
 
     parser.add_argument("file", help="URL to Modpack file")
+    parser.add_argument("--clear-cache", nargs=0, action=ActionClearCache, help="clear cache directory")
     # parser.add_argument("-e", "--exclude", metavar="file", help="json or csv file with mods to ignore")
     parser.add_argument("-m", "--multimc", action="store_true", help="setup a multimc instance")
     parser.add_argument("-s", "--server", action="store_true", help="install server specific files")
@@ -277,12 +290,6 @@ def main():
     logging.basicConfig(format='[%(levelname)s]: %(message)s', level=logging.INFO)
 
     prompt("Starting Curse server odyssey!")
-
-    os_cache_dir = os.path.join(os.path.expanduser("~"), ".cache")
-    check_dir(os_cache_dir, "os cache directory")
-
-    cache_dir = os.path.join(os_cache_dir, "pycmpdl")
-    check_dir(cache_dir, "cache directory")
 
     if not args.zip:
         file = download_modpack_file(args.file)
