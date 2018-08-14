@@ -10,7 +10,7 @@ import signal
 import subprocess
 import sys
 import threading
-from multiprocessing import Queue
+from queue import Queue
 from zipfile import ZipFile
 
 from requests import Session
@@ -28,24 +28,26 @@ PROJECT_BASE_URL = "https://minecraft.curseforge.com/mc-mods/"
 
 # runtime variables
 session = Session()
-copy_queue = Queue()
+print_messages = True
 
 # directories
 cache_dir = None
 modpack_cachedir = None
 modpack_basedir = None
 
-logging_lock = threading.Lock()
+LOCK = threading.Lock()
 
 
 def log(message, level=logging.INFO):
-    with logging_lock:
-        logging.log(level, message)
+    logging.log(level, message)
 
 
 def prompt(message):
-    with logging_lock:
-        print(message)
+    global print_messages
+
+    if print_messages:
+        with LOCK:
+            print(message)
 
 
 def exit_program(status):
@@ -70,6 +72,31 @@ def check_dir(path, dir_description):
     if not os.path.isdir(path):
         log("creating " + dir_description, logging.DEBUG)
         os.mkdir(path)
+
+
+def download_file(url, folder=None, s=session):
+    with s.get(url, allow_redirects=False) as response:
+        if 'Location' in response.headers:
+            url = response.headers['Location']
+
+        filename = url.split('/')[-1]
+
+        if folder:
+            filename = os.path.join(folder, filename)
+
+    with s.get(url, stream=True) as response:
+        if os.path.exists(filename):
+            remote_size = response.headers['Content-Length']
+            local_size = os.path.getsize(filename)
+
+            if int(local_size) == int(remote_size):
+                return filename
+
+        with open(filename, 'wb') as out_file:
+            for chunk in response.iter_content(chunk_size=1024):
+                out_file.write(chunk)
+
+    return filename
 
 
 def download_modpack_file(url):
@@ -122,51 +149,59 @@ def unzip_modpack(file):
     return manifest
 
 
-def download_file(url, folder=None):
-    with session.get(url, allow_redirects=False) as response:
-        if 'Location' in response.headers:
-            url = response.headers['Location']
-
-        filename = url.split('/')[-1]
-
-        if folder:
-            filename = os.path.join(folder, filename)
-
-    with session.get(url, stream=True) as response:
-        if os.path.exists(filename):
-            remote_size = response.headers['Content-Length']
-            local_size = os.path.getsize(filename)
-
-            if int(local_size) == int(remote_size):
-                return filename
-
-        with open(filename, 'wb') as out_file:
-            for chunk in response.iter_content(chunk_size=1024):
-                out_file.write(chunk)
-
-    return filename
-
-
 def download_mods(manifest):
     global modpack_basedir
+
+    download_queue = Queue()
+
+    def download_mod():
+        global download_count
+
+        # Totally hacky, but i couldn't find something else
+        try:
+            if not download_count:
+                download_count = 0
+        except NameError:
+            download_count = 0
+
+        with Session() as s:
+            while True:
+                file = download_queue.get()
+
+                project_url = s.get(PROJECT_BASE_URL + str(file['projectID'])).url
+
+                project_url += "/files/{}/download".format(file['fileID'])
+
+                filename = download_file(project_url, os.path.join(modpack_basedir, "mods"), s)
+                filename = str(filename).split('/')[-1]
+
+                with LOCK:
+                    download_count += 1
+                prompt(f"Downloaded mod {download_count} of {mod_count}: {filename}")
+
+                download_queue.task_done()
 
     prompt("Downloading mods...")
 
     check_dir(os.path.join(modpack_basedir, "mods"), "mods directory")
 
+    mod_count = len(manifest['files'])
+
+    for i in range(4):
+        thread = threading.Thread(target=download_mod)
+        thread.daemon = True
+        thread.start()
+
     for file in manifest['files']:
-        project_url = session.get(PROJECT_BASE_URL + str(file['projectID'])).url
+        download_queue.put(file)
 
-        project_url += "/files/{}/download".format(file['fileID'])
-
-        filename = download_file(project_url, os.path.join(modpack_basedir, "mods"))
-        log("Downloaded mod: " + str(filename).split('/')[-1])
+    download_queue.join()
 
     prompt("Mods downloaded")
 
 
 def copy_overrides(manifest):
-    global modpack_cachedir, modpack_basedir, copy_queue
+    global modpack_cachedir, modpack_basedir
 
     prompt("Copying overrides...")
 
@@ -254,7 +289,7 @@ def setup_server_instance(manifest):
 
 
 def main():
-    global cache_dir, modpack_cachedir, modpack_basedir
+    global cache_dir, modpack_cachedir, modpack_basedir, print_messages
 
     class ActionClearCache(argparse.Action):
 
@@ -284,10 +319,18 @@ def main():
     parser.add_argument("-s", "--server", action="store_true", help="install server specific files")
     parser.add_argument("-v", "--version", action="version", version=VERSION, help="show version and exit")
     parser.add_argument("-z", "--zip", action="store_true", help="use a zip file instead of URL")
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("-q", "--quiet", action="store_true", help="write nothing to output")
+    group.add_argument("-d", "--debug", action="store_true", help="write debug messages to output")
 
     args = parser.parse_args()
 
-    logging.basicConfig(format='[%(levelname)s]: %(message)s', level=logging.INFO)
+    if args.debug:
+        logging.basicConfig(format='[%(levelname)s]: %(message)s', level=logging.DEBUG)
+    elif args.quiet:
+        print_messages = False
+    else:
+        logging.basicConfig(format='[%(levelname)s]: %(message)s', level=None)
 
     prompt("Starting Curse server odyssey!")
 
