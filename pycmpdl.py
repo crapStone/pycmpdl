@@ -15,14 +15,13 @@ from zipfile import ZipFile
 
 from requests import Session
 
-VERSION = "1.2.0"
+VERSION = "1.2.1"
 
 # Exit codes
 EXIT_NO_ERROR = 0
 EXIT_NO_MODPACK = 2
 EXIT_UNKNOWN_MANIFEST_VERSION = 3
-EXIT_TERMINATED_BY_USER = 99
-EXIT_UNKNOWN_ERROR = 100
+EXIT_TERMINATED_BY_USER = 9
 
 PROJECT_BASE_URL = "https://minecraft.curseforge.com/mc-mods/"
 
@@ -34,6 +33,7 @@ print_messages = True
 cache_dir = None
 modpack_cachedir = None
 modpack_basedir = None
+minecraft_dir = None
 
 LOCK = threading.Lock()
 
@@ -150,7 +150,7 @@ def unzip_modpack(file):
 
 
 def download_mods(manifest):
-    global modpack_basedir
+    global minecraft_dir
 
     download_queue = Queue()
 
@@ -172,7 +172,7 @@ def download_mods(manifest):
 
                 project_url += "/files/{}/download".format(file['fileID'])
 
-                filename = download_file(project_url, os.path.join(modpack_basedir, "mods"), s)
+                filename = download_file(project_url, os.path.join(minecraft_dir, "mods"), s)
                 filename = str(filename).split('/')[-1]
 
                 with LOCK:
@@ -183,7 +183,7 @@ def download_mods(manifest):
 
     prompt("Downloading mods...")
 
-    check_dir(os.path.join(modpack_basedir, "mods"), "mods directory")
+    check_dir(os.path.join(minecraft_dir, "mods"), "mods directory")
 
     mod_count = len(manifest['files'])
 
@@ -201,7 +201,7 @@ def download_mods(manifest):
 
 
 def copy_overrides(manifest):
-    global modpack_cachedir, modpack_basedir
+    global modpack_cachedir, minecraft_dir
 
     prompt("Copying overrides...")
 
@@ -209,13 +209,13 @@ def copy_overrides(manifest):
 
     for dirname, dirnames, filenames in os.walk(override_dir):
         for subdirname in dirnames:
-            path = os.path.join(dirname, subdirname).replace(override_dir, modpack_basedir)
+            path = os.path.join(dirname, subdirname).replace(override_dir, minecraft_dir)
 
             check_dir(path, "directory: " + subdirname)
 
         for filename in filenames:
             path_in = os.path.join(dirname, filename)
-            path_out = path_in.replace(override_dir, modpack_basedir)
+            path_out = path_in.replace(override_dir, minecraft_dir)
 
             shutil.copyfile(path_in, path_out)
             log("Override: " + filename)
@@ -253,7 +253,7 @@ def setup_multimc_instance(manifest):
 
 
 def setup_server_instance(manifest):
-    global modpack_basedir
+    global minecraft_dir
 
     def check_java():
         try:
@@ -270,7 +270,7 @@ def setup_server_instance(manifest):
     forge_jar = f"forge-{forge_version}-installer.jar"
 
     download_file(f"http://files.minecraftforge.net/maven/net/minecraftforge/forge/"
-                  f"{forge_version}/forge-{forge_version}-installer.jar", modpack_basedir)
+                  f"{forge_version}/forge-{forge_version}-installer.jar", minecraft_dir)
 
     if not check_java():
         prompt("*************************************************"
@@ -279,7 +279,7 @@ def setup_server_instance(manifest):
         return
 
     old_wd = os.getcwd()
-    os.chdir(modpack_basedir)
+    os.chdir(minecraft_dir)
     subprocess.run(["java", "-jar", forge_jar, "--installServer"])
     os.remove(forge_jar)
     os.remove(forge_jar + ".log")
@@ -289,7 +289,7 @@ def setup_server_instance(manifest):
 
 
 def main():
-    global cache_dir, modpack_cachedir, modpack_basedir, print_messages
+    global cache_dir, modpack_cachedir, modpack_basedir, minecraft_dir, print_messages
 
     class ActionClearCache(argparse.Action):
 
@@ -341,7 +341,13 @@ def main():
 
     manifest = unzip_modpack(file)
 
+    if args.multimc:
+        minecraft_dir = os.path.join(modpack_basedir, ".minecraft")
+    else:
+        minecraft_dir = modpack_basedir
+
     check_dir(modpack_basedir, "modpack base directory")
+    check_dir(minecraft_dir, "minecraft directory")
 
     download_mods(manifest)
 
